@@ -1,0 +1,32 @@
+name: 打卡提醒
+
+on:
+  schedule:
+    # 北京时间 = UTC + 8
+    # 中午时段 12:00-14:30 北京 = 04:00-06:30 UTC，每30分钟一次
+    - cron: '0,30 4-6 * * *'
+    # 晚上时段 19:00-21:30 北京 = 11:00-13:30 UTC，每30分钟一次
+    - cron: '0,30 11-13 * * *'
+  workflow_dispatch: # 允许手动触发测试
+
+jobs:
+  remind:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - run: npm install
+
+      - name: 执行提醒脚本
+        env:
+          FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
+          FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
+          FEISHU_USER_OPEN_ID: ${{ secrets.FEISHU_USER_OPEN_ID }}
+          GH_PAT: ${{ secrets.GH_PAT }}
+          GITHUB_OWNER: ${{ github.repository_owner }}
+          GITHUB_REPO: ${{ github.event.repository.name }}
+        run: node scripts/remind.js

@@ -1,0 +1,9 @@
+{
+  "name": "checkin-monitor",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@google/generative-ai": "^0.21.0"
+  }
+}
