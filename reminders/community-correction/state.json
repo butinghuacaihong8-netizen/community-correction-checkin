@@ -1,9 +1,9 @@
 {
   "date": "2026-03-08",
   "noon": {
-    "verified": false,
-    "verifiedAt": null,
-    "screenshotTime": null
+    "verified": true,
+    "verifiedAt": "2026-03-08T07:42:05.605Z",
+    "screenshotTime": "2026-03-08 12:03:48"
   },
   "evening": {
     "verified": false,
