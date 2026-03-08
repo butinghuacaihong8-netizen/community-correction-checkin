@@ -462,4 +462,99 @@ wsClient.start({
 console.log('========================================');
 console.log('  打卡监督机器人已启动（长连接模式）');
 console.log('  等待用户发送消息...');
+console.log('  定时提醒已开启（每3分钟检查）');
 console.log('========================================');
+
+// ===== 定时主动提醒 =====
+const REMIND_INTERVAL = 3 * 60 * 1000; // 3分钟
+
+function getBeijingHour() {
+  return parseInt(new Date().toLocaleString('en-US', {
+    timeZone: 'Asia/Shanghai', hour: 'numeric', hour12: false,
+  }));
+}
+
+async function proactiveRemind() {
+  try {
+    const hour = getBeijingHour();
+
+    // 判断当前时段
+    let period = null;
+    if (hour >= 12 && hour < 15) period = 'noon';
+    else if (hour >= 19 && hour < 22) period = 'evening';
+
+    if (!period) return; // 不在打卡时段
+
+    // 读取状态
+    let state = readLocalState();
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Shanghai' });
+    if (state.date !== today) {
+      state = getDefaultState();
+      writeLocalState(state);
+    }
+
+    if (state[period].verified) return; // 已打卡
+
+    // 获取用户 ID
+    const userId = process.env.FEISHU_USER_OPEN_ID;
+    if (!userId) {
+      // 尝试从 user-config 读取
+      try {
+        const config = JSON.parse(fs.readFileSync(USER_CONFIG_FILE, 'utf-8'));
+        if (!config.openId) return;
+        process.env.FEISHU_USER_OPEN_ID = config.openId;
+      } catch { return; }
+    }
+
+    const targetId = process.env.FEISHU_USER_OPEN_ID;
+    const periodName = period === 'noon' ? '中午' : '晚上';
+    const messageText = `【加急提醒】${periodName}打卡还未完成！请立即打卡并把截图发给我！`;
+
+    console.log(`[REMIND] ${periodName}未打卡，发送提醒...`);
+
+    // 发送提醒
+    const msgResult = await client.im.message.create({
+      params: { receive_id_type: 'open_id' },
+      data: {
+        receive_id: targetId,
+        msg_type: 'text',
+        content: JSON.stringify({ text: messageText }),
+      },
+    });
+
+    // SDK 返回的 message_id 在 data 里
+    const messageId = msgResult?.data?.message_id || msgResult?.message_id;
+    console.log(`[REMIND] 已发送${periodName}提醒, message_id=${messageId}`);
+
+    if (messageId) {
+      // 应用内加急 - 用 fetch 直接调用
+      try {
+        const tokenRes = await fetch('https://open.feishu.cn/open-apis/auth/v3/app_access_token/internal', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ app_id: APP_ID, app_secret: APP_SECRET }),
+        });
+        const tokenData = await tokenRes.json();
+        const accessToken = tokenData.app_access_token;
+        await fetch(`https://open.feishu.cn/open-apis/im/v1/messages/${messageId}/urgent_app?user_id_type=open_id`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({ user_id_list: [targetId] }),
+        });
+        console.log(`[REMIND] 已应用加急`);
+      } catch (e) {
+        console.error('[REMIND] 加急失败:', e.message);
+      }
+    }
+  } catch (err) {
+    console.error('[REMIND] 定时提醒出错:', err.message);
+  }
+}
+
+// 启动定时器
+setInterval(proactiveRemind, REMIND_INTERVAL);
+// 启动后立即检查一次
+setTimeout(proactiveRemind, 5000);
