@@ -1,4 +1,9 @@
 // 飞书长连接机器人 - 本地运行，处理消息和打卡审核
+import { ProxyAgent, setGlobalDispatcher } from 'undici';
+// 设置全局代理，让 fetch 走代理访问 Google API
+const PROXY_URL = 'http://127.0.0.1:7897';
+setGlobalDispatcher(new ProxyAgent(PROXY_URL));
+
 import * as lark from '@larksuiteoapi/node-sdk';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import fs from 'fs';
@@ -225,16 +230,46 @@ async function downloadImage(messageId, imageKey) {
     path: { message_id: messageId, file_key: imageKey },
     params: { type: 'image' },
   });
-  // SDK 返回的是 ReadableStream 或 Buffer
+
+  // SDK v1.x 可能返回 { writeFile } 或 Readable stream 或直接是 Buffer
   if (Buffer.isBuffer(res)) return res;
   if (res instanceof ArrayBuffer) return Buffer.from(res);
 
-  // 如果是 stream，读取为 buffer
-  const chunks = [];
-  for await (const chunk of res) {
-    chunks.push(chunk);
+  // SDK 可能返回一个带 writeFile 方法的对象，需要用另一种方式获取
+  // 尝试用 stream/pipeline 方式
+  if (res && typeof res.pipe === 'function') {
+    const { Writable } = await import('stream');
+    const chunks = [];
+    return new Promise((resolve, reject) => {
+      res.on('data', (chunk) => chunks.push(chunk));
+      res.on('end', () => resolve(Buffer.concat(chunks)));
+      res.on('error', reject);
+    });
   }
-  return Buffer.concat(chunks);
+
+  // 如果 res 有 data 属性
+  if (res && res.data) {
+    if (Buffer.isBuffer(res.data)) return res.data;
+    if (typeof res.data.pipe === 'function') {
+      const chunks = [];
+      return new Promise((resolve, reject) => {
+        res.data.on('data', (chunk) => chunks.push(chunk));
+        res.data.on('end', () => resolve(Buffer.concat(chunks)));
+        res.data.on('error', reject);
+      });
+    }
+  }
+
+  // 如果 res 有 writeFile 方法，用临时文件
+  if (res && typeof res.writeFile === 'function') {
+    const tmpPath = path.join(PROJECT_ROOT, '.tmp-image.png');
+    await res.writeFile(tmpPath);
+    const buf = fs.readFileSync(tmpPath);
+    fs.unlinkSync(tmpPath);
+    return buf;
+  }
+
+  throw new Error(`无法处理 SDK 返回类型: ${res?.constructor?.name}, keys: ${res ? Object.keys(res) : 'null'}`);
 }
 
 // ===== Gemini 截图审核 =====
