@@ -8,7 +8,30 @@ async function main() {
   const githubToken = process.env.GH_PAT;
   const owner = process.env.GITHUB_OWNER;
   const repo = process.env.GITHUB_REPO;
-  const userId = process.env.FEISHU_USER_OPEN_ID;
+  let userId = process.env.FEISHU_USER_OPEN_ID;
+
+  // 如果环境变量没有，尝试从 GitHub repo 的 user-config.json 读取
+  if (!userId) {
+    try {
+      const res = await fetch(
+        `https://api.github.com/repos/${owner}/${repo}/contents/reminders/community-correction/user-config.json`,
+        { headers: { 'Authorization': `token ${githubToken}`, 'Accept': 'application/vnd.github.v3+json' } }
+      );
+      if (res.ok) {
+        const data = await res.json();
+        const config = JSON.parse(Buffer.from(data.content, 'base64').toString('utf-8'));
+        userId = config.openId;
+        console.log(`从 user-config.json 获取到 Open ID: ${userId}`);
+      }
+    } catch (e) {
+      console.error('读取 user-config.json 失败:', e.message);
+    }
+  }
+
+  if (!userId) {
+    console.log('未找到用户 Open ID，跳过提醒。用户需要先给机器人发一条消息。');
+    return;
+  }
 
   // 判断当前时段
   const period = getPeriodToRemind();
